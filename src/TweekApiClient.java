@@ -7,6 +7,7 @@ import java.util.Collection;
 import java.util.List;
 import java.util.Map;
 import java.util.Map.Entry;
+import java.util.function.Supplier;
 import java.util.stream.Collectors;
 
 import javax.xml.ws.http.HTTPException;
@@ -15,6 +16,7 @@ import com.google.gson.Gson;
 import com.google.gson.reflect.TypeToken;
 
 import org.apache.http.Header;
+import org.apache.http.HttpRequestInterceptor;
 import org.apache.http.HttpResponse;
 import org.apache.http.client.ClientProtocolException;
 import org.apache.http.client.HttpClient;
@@ -29,30 +31,43 @@ public class TweekApiClient implements TweekApiClientInterface
 {
     private final String JSON_MEDIATYPE = "application/json";
 
-    HttpClient client;
+    private HttpClient client;
     private String url;
-
+    
     public TweekApiClient(String baseUrl) {
-    	initialize(baseUrl, null);
+    	initialize(baseUrl, null, null);
     }
     
     public TweekApiClient(String baseUrl, String apiClientName) {
-    	initialize(baseUrl, apiClientName);
+    	initialize(baseUrl, apiClientName, null);
     }
     
-    private void initialize(String baseUrl, String apiClientName) {
+    public TweekApiClient(String baseUrl, String apiClientName, Supplier<String> getAuthenticationToken) {
+    	initialize(baseUrl, apiClientName, getAuthenticationToken);
+    }
+    
+    private void initialize(String baseUrl, String apiClientName, Supplier<String> getAuthenticationToken) {
     	this.url = String.format("%s/api/v1", baseUrl);
-    	
+    	HttpClientBuilder clientBuilder;
     	if (apiClientName == null) {
-    		client = HttpClientBuilder.create().build();
+    		clientBuilder = HttpClientBuilder.create();
     	} else {
     		Collection<Header> defaultHeaders = new ArrayList<>();
     		defaultHeaders.add(new BasicHeader("X-Api-Client", apiClientName));
-    		client = HttpClientBuilder
+    		
+    		clientBuilder = HttpClientBuilder
     				.create()
-    				.setDefaultHeaders(defaultHeaders)
-    				.build();
+    				.setDefaultHeaders(defaultHeaders);
     	}
+    	
+    	client = clientBuilder
+    			.addInterceptorLast((HttpRequestInterceptor) (request, context) -> {
+					if (getAuthenticationToken != null) {
+						String token = getAuthenticationToken.get();
+						request.setHeader("Authorization", String.format("Bearer %s", token));
+					}
+	            })
+    			.build();
     }
     
     @Override
@@ -164,7 +179,7 @@ public class TweekApiClient implements TweekApiClientInterface
 			throws ClientProtocolException, IOException {
     	String url = String.format("%s/context/%s/%s", this.url, identityType, identityId);
 		HttpPost post = new HttpPost(url);
-		post.setHeader("Content-type", JSON_MEDIATYPE);
+		post.setHeader("Content-type", JSON_MEDIATYPE);		
 		Gson gson = new Gson();
 		StringEntity json = new StringEntity(gson.toJson(context));
 		post.setEntity(json);
@@ -174,6 +189,7 @@ public class TweekApiClient implements TweekApiClientInterface
 		Integer statusCode = response.getStatusLine().getStatusCode();
 		
 		if (statusCode >= 300) {
+			System.out.println(statusCode);
 			throw new HTTPException(statusCode);
 		}
 	}
@@ -196,7 +212,6 @@ public class TweekApiClient implements TweekApiClientInterface
 
 		String fullUrl = String.format("%s/keys/%s", this.url, keyPath);
     	HttpGet request = new HttpGet(fullUrl);
-
     	HttpResponse response = client.execute(request);
     	
     	BufferedReader rd = new BufferedReader(
